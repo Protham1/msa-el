@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Copy, TriangleAlert } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronRight, Copy, LoaderCircle, TriangleAlert } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
-import { api } from "../api/client";
+import { api, ApiError } from "../api/client";
 import type { DemoConfig, Span, TraceDetail } from "../types/tracing";
 import { EmptyState, ErrorState, LoadingState } from "../components/States";
 import { computeBottleneck } from "../lib/bottleneck";
@@ -11,6 +11,14 @@ interface Props {
   onDataStatus: (status: "live" | "unavailable") => void;
 }
 
+// Spans arrive from each service in separate OTLP batches, so a trace that just
+// finished can still be growing. Re-fetch it quietly a few times right after it starts.
+const RECENT_TRACE_WINDOW_MS = 30_000;
+const REFRESH_DELAYS_MS = [1500, 3000, 5000];
+// A just-finished trace can be missing from Jaeger for a moment while the first
+// batches are still being exported, so retry "not found" briefly before failing.
+const NOT_FOUND_RETRY_DELAYS_MS = [400, 700, 1000, 1500];
+
 export default function TraceDetailPage({ refreshKey, onDataStatus }: Props) {
   const { traceId = "" } = useParams();
   const [trace, setTrace] = useState<TraceDetail | null>(null);
@@ -18,28 +26,78 @@ export default function TraceDetailPage({ refreshKey, onDataStatus }: Props) {
   const [selected, setSelected] = useState<Span | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [collecting, setCollecting] = useState(false);
+  const refreshTimers = useRef<number[]>([]);
+  const scheduledRefreshFor = useRef("");
+  const loadGeneration = useRef(0);
 
   const load = useCallback(async () => {
+    const generation = ++loadGeneration.current;
     setLoading(true);
     setError("");
     try {
       const [data, configData] = await Promise.all([
-        api.trace(traceId),
+        fetchTraceWhenIndexed(traceId),
         api.getConfig().catch(() => null),
       ]);
+      if (generation !== loadGeneration.current) return;
       setTrace(data);
       setConfig(configData);
       setSelected(data.spans[0] || null);
       onDataStatus("live");
     } catch (err) {
+      if (generation !== loadGeneration.current) return;
       setError(err instanceof Error ? err.message : "Could not load this trace.");
       onDataStatus("unavailable");
     } finally {
-      setLoading(false);
+      if (generation === loadGeneration.current) setLoading(false);
     }
   }, [onDataStatus, traceId]);
 
   useEffect(() => { void load(); }, [load, refreshKey]);
+
+  // Quiet refetch: no loading state, keeps the current span selected when it survives.
+  const refreshSilently = useCallback(async () => {
+    const generation = loadGeneration.current;
+    try {
+      const data = await api.trace(traceId);
+      if (generation !== loadGeneration.current) return;
+      setTrace(data);
+      setSelected((previous) => {
+        if (!previous) return data.spans[0] || null;
+        return data.spans.find((span) => span.spanId === previous.spanId) || data.spans[0] || null;
+      });
+      onDataStatus("live");
+    } catch {
+      // Keep the last good view; the next scheduled attempt may still succeed.
+    }
+  }, [onDataStatus, traceId]);
+
+  // Drop pending refetches when the trace changes or the page unmounts.
+  useEffect(() => () => {
+    refreshTimers.current.forEach((timer) => window.clearTimeout(timer));
+    refreshTimers.current = [];
+    scheduledRefreshFor.current = "";
+  }, [traceId]);
+
+  useEffect(() => {
+    if (!trace || trace.traceId !== traceId || !isRecentTrace(trace.startTime)) return;
+    // One round of refetches per trace, even if a later batch shifts startTime.
+    if (scheduledRefreshFor.current === traceId) return;
+    scheduledRefreshFor.current = traceId;
+
+    refreshTimers.current = REFRESH_DELAYS_MS.map((delay, index) =>
+      window.setTimeout(() => {
+        void refreshSilently().finally(() => {
+          if (index === REFRESH_DELAYS_MS.length - 1) {
+            refreshTimers.current = [];
+            setCollecting(false);
+          }
+        });
+      }, delay),
+    );
+    setCollecting(true);
+  }, [refreshSilently, trace, traceId]);
 
   if (loading) return <LoadingState label="Loading trace detail" />;
   if (error) return <ErrorState message={error} retry={load} />;
@@ -60,6 +118,11 @@ export default function TraceDetailPage({ refreshKey, onDataStatus }: Props) {
       <div className="breadcrumb">
         <Link to="/traces">Traces</Link><span>/</span><span className="mono">{traceId}</span>
         <button className="copy-button" onClick={copyTraceId} title="Copy trace ID"><Copy size={14} /></button>
+        {collecting && (
+          <span className="collecting-badge" title="Spans are still being exported by the services">
+            <LoaderCircle className="spin" size={11} /> Collecting spans…
+          </span>
+        )}
       </div>
 
       <section className="detail-metrics">
@@ -200,6 +263,28 @@ function DetailMetric({ label, value, error }: { label: string; value: string; e
 function startNano(span: Span) {
   const value = Number(span.startTimeUnixNano);
   return Number.isFinite(value) ? value : 0;
+}
+
+function isRecentTrace(startTime: string) {
+  // RFC3339Nano may carry 9 fractional digits; keep the 3 that Date.parse expects.
+  const startedAt = Date.parse(startTime.replace(/(\.\d{3})\d+/, "$1"));
+  return Number.isFinite(startedAt) && Date.now() - startedAt <= RECENT_TRACE_WINDOW_MS;
+}
+
+async function fetchTraceWhenIndexed(traceId: string): Promise<TraceDetail> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await api.trace(traceId);
+    } catch (err) {
+      const notIndexedYet = err instanceof ApiError && err.status === 404;
+      if (!notIndexedYet || attempt >= NOT_FOUND_RETRY_DELAYS_MS.length) throw err;
+      await delay(NOT_FOUND_RETRY_DELAYS_MS[attempt]);
+    }
+  }
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function configuredDelayFor(serviceName: string, config: DemoConfig | null) {

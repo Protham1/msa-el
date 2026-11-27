@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -33,7 +34,7 @@ func initTracer(ctx context.Context) (*sdktrace.TracerProvider, error) {
 	)
 
 	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(exporter),
+		sdktrace.WithBatcher(exporter, sdktrace.WithBatchTimeout(1*time.Second)),
 		sdktrace.WithResource(res),
 	)
 

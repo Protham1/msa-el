@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -43,7 +44,7 @@ func initTracer(ctx context.Context) (*sdktrace.TracerProvider, error) {
 		attribute.String("service.name", "traceflow-api"),
 	)
 	provider := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(exporter),
+		sdktrace.WithBatcher(exporter, sdktrace.WithBatchTimeout(1*time.Second)),
 		sdktrace.WithResource(res),
 	)
 	otel.SetTracerProvider(provider)

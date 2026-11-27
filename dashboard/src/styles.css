@@ -133,6 +133,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .breadcrumb a { color: #78b8d5; text-decoration: none; }
 .breadcrumb .mono { max-width: 360px; overflow: hidden; text-overflow: ellipsis; }
 .copy-button { margin-left: 4px; width: 27px; height: 27px; }
+.collecting-badge { display: inline-flex; align-items: center; gap: 5px; height: 21px; padding: 0 9px; border: 1px solid #234861; border-radius: 11px; background: rgba(99,183,217,.07); color: #83cbed; font-size: 9px; letter-spacing: .2px; }
 .detail-metrics { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin: 8px 0 12px; }
 .detail-metric { height: 72px; border: 1px solid var(--border); background: var(--panel); border-radius: 7px; padding: 14px 16px; }
 .detail-metric span, .detail-metric strong { display: block; }
