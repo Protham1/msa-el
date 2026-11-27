@@ -28,7 +28,12 @@ export const api = {
   services: () => request<ServiceNode[]>("/api/services"),
   traces: (params: URLSearchParams) => request<TraceSummary[]>(`/api/traces${params.toString() ? `?${params}` : ""}`),
   trace: (traceId: string) => request<TraceDetail>(`/api/traces/${encodeURIComponent(traceId)}`),
-  dependencies: () => request<{ dataSource: "static" | "telemetry"; nodes: ServiceNode[]; edges: DependencyEdge[] }>("/api/dependencies"),
+  dependencies: () => request<{
+    dataSource: "static" | "telemetry";
+    message?: string;
+    nodes: ServiceNode[];
+    edges: DependencyEdge[];
+  }>("/api/dependencies"),
   checkout: () => request<CheckoutResult>("/api/demo/checkout", { method: "POST" }),
   getConfig: () => request<DemoConfig>("/api/demo/config"),
   updateConfig: (config: DemoConfig) => request<DemoConfig>("/api/demo/config", {

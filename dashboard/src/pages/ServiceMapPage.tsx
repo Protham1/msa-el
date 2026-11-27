@@ -30,6 +30,7 @@ export default function ServiceMapPage({ refreshKey, onDataStatus }: Props) {
   const [edges, setEdges] = useState<Edge[]>([]);
   const [selected, setSelected] = useState<ServiceNode | null>(null);
   const [dataSource, setDataSource] = useState<"static" | "telemetry">("static");
+  const [sourceMessage, setSourceMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -43,11 +44,13 @@ export default function ServiceMapPage({ refreshKey, onDataStatus }: Props) {
       setNodes(toFlowNodes(serviceNodes));
       setEdges(toFlowEdges(dependencyEdges));
       setDataSource(data.dataSource || "static");
+      setSourceMessage(data.message || "");
       onDataStatus("live");
     } catch (err) {
       setNodes(toFlowNodes(STATIC_NODES));
       setEdges(toFlowEdges(STATIC_EDGES));
       setDataSource("static");
+      setSourceMessage("");
       setError(err instanceof Error ? err.message : "Could not reach the dependency API.");
       onDataStatus("unavailable");
     } finally {
@@ -60,7 +63,7 @@ export default function ServiceMapPage({ refreshKey, onDataStatus }: Props) {
   if (loading) return <LoadingState label="Loading service topology" />;
 
   return (
-    <div className="map-layout">
+    <div className={`map-layout ${selected ? "has-selection" : ""}`}>
       <section className="map-canvas">
         {error && (
           <div className="map-alert">
@@ -70,7 +73,7 @@ export default function ServiceMapPage({ refreshKey, onDataStatus }: Props) {
         )}
         <div className="map-source">
           <i className={dataSource === "telemetry" ? "live" : "static"} />
-          {dataSource === "telemetry" ? "Telemetry-derived topology" : "Static demo topology"}
+          {sourceMessage || (dataSource === "telemetry" ? "Telemetry-derived topology" : "Static demo topology")}
         </div>
         {nodes.length === 0 ? (
           <EmptyState title="No service topology" message="The API has not returned nodes or edges." />
@@ -79,7 +82,7 @@ export default function ServiceMapPage({ refreshKey, onDataStatus }: Props) {
             nodes={nodes}
             edges={edges}
             fitView
-            proOptions={{ hideAttribution: true }}
+            fitViewOptions={{ padding: 0.2, minZoom: 0.75, maxZoom: 1.25 }}
             onNodeClick={(_, node) => setSelected({
               id: String(node.id),
               name: String(node.data.label),
@@ -120,23 +123,39 @@ export default function ServiceMapPage({ refreshKey, onDataStatus }: Props) {
 
 function toFlowNodes(services: ServiceNode[]): Node[] {
   const positions: Record<string, { x: number; y: number }> = {
+    "traceflow-api": { x: 300, y: -110 },
     gateway: { x: 300, y: 20 },
     "auth-service": { x: 300, y: 150 },
     "order-service": { x: 300, y: 280 },
     "payment-service": { x: 130, y: 420 },
     "inventory-service": { x: 470, y: 420 },
   };
-  return services.map((service) => ({
+  return services.map((service, index) => ({
     id: service.id,
-    position: positions[service.id] || { x: 300, y: 280 },
+    position: positions[service.id] || {
+      x: 130 + (index % 3) * 170,
+      y: 150 + Math.floor(index / 3) * 130,
+    },
     data: {
-      label: service.name,
+      label: displayServiceName(service.name),
       status: service.status,
       averageLatencyMs: service.averageLatencyMs,
       requestCount: service.requestCount,
     },
     className: `service-flow-node ${service.status}`,
   }));
+}
+
+function displayServiceName(name: string) {
+  const knownNames: Record<string, string> = {
+    "traceflow-api": "TraceFlow API",
+    gateway: "Gateway",
+    "auth-service": "Auth",
+    "order-service": "Order",
+    "payment-service": "Payment",
+    "inventory-service": "Inventory",
+  };
+  return knownNames[name] || name.replace(/[-_]/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function toFlowEdges(edges: DependencyEdge[]): Edge[] {

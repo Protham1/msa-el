@@ -199,7 +199,29 @@ func (a *API) overview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
-func (a *API) dependencies(w http.ResponseWriter, _ *http.Request) {
+func (a *API) dependencies(w http.ResponseWriter, r *http.Request) {
+	traces, err := a.jaeger.FindTraces(r.Context(), "", "", overviewTraceLimit)
+	if err != nil {
+		writeUpstreamError(w, err)
+		return
+	}
+	checkoutTraces := make([]models.TraceDetail, 0, len(traces))
+	for _, trace := range traces {
+		summary := jaeger.Summarize(trace)
+		if isCheckoutTrace(summary) {
+			checkoutTraces = append(checkoutTraces, trace)
+		}
+	}
+	if len(checkoutTraces) > 0 {
+		nodes, edges := jaeger.DependenciesFromTraces(checkoutTraces)
+		writeJSON(w, http.StatusOK, models.Dependencies{
+			DataSource: "telemetry",
+			Nodes:      nodes,
+			Edges:      edges,
+		})
+		return
+	}
+
 	names := []string{"gateway", "auth-service", "order-service", "payment-service", "inventory-service"}
 	nodes := make([]models.ServiceNode, 0, len(names))
 	for _, name := range names {
@@ -213,9 +235,22 @@ func (a *API) dependencies(w http.ResponseWriter, _ *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, models.Dependencies{
 		DataSource: "static",
+		Message:    "Awaiting checkout trace data",
 		Nodes:      nodes,
 		Edges:      edges,
 	})
+}
+
+func isCheckoutTrace(summary models.TraceSummary) bool {
+	operation := strings.ToLower(summary.RootOperation)
+	switch summary.RootService {
+	case "gateway":
+		return strings.Contains(operation, "checkout")
+	case "traceflow-api":
+		return strings.Contains(operation, "demo/checkout") || strings.Contains(operation, "demo.checkout")
+	default:
+		return false
+	}
 }
 
 func (a *API) checkout(w http.ResponseWriter, r *http.Request) {

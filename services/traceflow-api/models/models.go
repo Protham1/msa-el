@@ -62,6 +62,7 @@ type DependencyEdge struct {
 
 type Dependencies struct {
 	DataSource string           `json:"dataSource"`
+	Message    string           `json:"message,omitempty"`
 	Nodes      []ServiceNode    `json:"nodes"`
 	Edges      []DependencyEdge `json:"edges"`
 }

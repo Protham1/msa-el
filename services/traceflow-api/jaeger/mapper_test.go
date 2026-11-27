@@ -115,3 +115,40 @@ func TestMapTraceDataUsesAttributesForErrorStatus(t *testing.T) {
 		t.Error("trace with HTTP 503 was not marked as an error")
 	}
 }
+
+func TestDependenciesFromTracesUsesCrossServiceParentChildSpans(t *testing.T) {
+	traces := []models.TraceDetail{
+		{Spans: []models.Span{
+			{SpanID: "gateway-root", ServiceName: "gateway", DurationMs: 100},
+			{SpanID: "gateway-client", ParentSpanID: "gateway-root", ServiceName: "gateway", DurationMs: 40},
+			{SpanID: "auth-server", ParentSpanID: "gateway-client", ServiceName: "auth-service", DurationMs: 30},
+			{SpanID: "order-server", ParentSpanID: "auth-server", ServiceName: "order-service", DurationMs: 25},
+			{SpanID: "jaeger-internal", ParentSpanID: "gateway-root", ServiceName: "jaeger", DurationMs: 2},
+		}},
+		{Spans: []models.Span{
+			{SpanID: "gateway-root-2", ServiceName: "gateway", DurationMs: 120},
+			{SpanID: "gateway-client-2", ParentSpanID: "gateway-root-2", ServiceName: "gateway", DurationMs: 50},
+			{SpanID: "auth-server-2", ParentSpanID: "gateway-client-2", ServiceName: "auth-service", DurationMs: 35},
+		}},
+	}
+
+	nodes, edges := DependenciesFromTraces(traces)
+	if len(nodes) != 3 {
+		t.Fatalf("got %d service nodes, want 3", len(nodes))
+	}
+	if len(edges) != 2 {
+		t.Fatalf("got %d dependency edges, want 2", len(edges))
+	}
+	if edges[0].Source != "auth-service" || edges[0].Target != "order-service" {
+		t.Errorf("first edge = %s -> %s", edges[0].Source, edges[0].Target)
+	}
+	if edges[1].Source != "gateway" || edges[1].Target != "auth-service" {
+		t.Errorf("second edge = %s -> %s", edges[1].Source, edges[1].Target)
+	}
+	if edges[1].CallCount == nil || *edges[1].CallCount != 2 {
+		t.Errorf("gateway -> auth call count = %v, want 2", edges[1].CallCount)
+	}
+	if edges[1].AverageLatencyMs == nil || *edges[1].AverageLatencyMs != 32.5 {
+		t.Errorf("gateway -> auth avg latency = %v, want 32.5 ms", edges[1].AverageLatencyMs)
+	}
+}

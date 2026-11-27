@@ -7,6 +7,7 @@ import (
 	"math"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"traceflow/traceflow-api/models"
@@ -155,6 +156,74 @@ func Summarize(trace models.TraceDetail) models.TraceSummary {
 		ServiceNames:  serviceNames,
 		HasError:      hasError,
 	}
+}
+
+func DependenciesFromTraces(traces []models.TraceDetail) ([]models.ServiceNode, []models.DependencyEdge) {
+	type edgeStats struct {
+		callCount int
+		duration  float64
+	}
+
+	serviceSet := make(map[string]struct{})
+	stats := make(map[string]*edgeStats)
+	for _, trace := range traces {
+		spansByID := make(map[string]models.Span, len(trace.Spans))
+		for _, span := range trace.Spans {
+			if span.ServiceName == "" || strings.EqualFold(span.ServiceName, "jaeger") {
+				continue
+			}
+			spansByID[span.SpanID] = span
+			serviceSet[span.ServiceName] = struct{}{}
+		}
+		for _, span := range trace.Spans {
+			if span.ServiceName == "" || strings.EqualFold(span.ServiceName, "jaeger") {
+				continue
+			}
+			parent, found := spansByID[span.ParentSpanID]
+			if !found || parent.ServiceName == span.ServiceName {
+				continue
+			}
+			key := parent.ServiceName + "\x00" + span.ServiceName
+			if stats[key] == nil {
+				stats[key] = &edgeStats{}
+			}
+			stats[key].callCount++
+			stats[key].duration += span.DurationMs
+		}
+	}
+
+	serviceNames := make([]string, 0, len(serviceSet))
+	for name := range serviceSet {
+		serviceNames = append(serviceNames, name)
+	}
+	sort.Strings(serviceNames)
+
+	nodes := make([]models.ServiceNode, 0, len(serviceNames))
+	for _, name := range serviceNames {
+		nodes = append(nodes, models.ServiceNode{ID: name, Name: name, Status: "unknown"})
+	}
+
+	edges := make([]models.DependencyEdge, 0, len(stats))
+	for key, value := range stats {
+		parts := bytes.SplitN([]byte(key), []byte{0}, 2)
+		count := value.callCount
+		average := value.duration / float64(count)
+		source, target := string(parts[0]), string(parts[1])
+		edges = append(edges, models.DependencyEdge{
+			ID:               source + "-" + target,
+			Source:           source,
+			Target:           target,
+			CallCount:        &count,
+			AverageLatencyMs: &average,
+		})
+	}
+	sort.Slice(edges, func(i, j int) bool {
+		if edges[i].Source == edges[j].Source {
+			return edges[i].Target < edges[j].Target
+		}
+		return edges[i].Source < edges[j].Source
+	})
+	return nodes, edges
 }
 
 func mapSpan(raw otlpSpan, service string) (mappedSpan, error) {
