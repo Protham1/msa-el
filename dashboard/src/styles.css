@@ -144,6 +144,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .bottleneck-banner span, .bottleneck-banner strong { display: block; }
 .bottleneck-banner div > span { color: #8a7f68; font-size: 9px; margin-bottom: 4px; }
 .bottleneck-banner div > strong { font-size: 12px; }
+.bottleneck-banner div > small { display: block; color: #7f897f; font-size: 9px; margin-top: 3px; }
 .bottleneck-duration { text-align: right; }
 .bottleneck-duration strong { color: #dfbd78; }
 .bottleneck-duration span { color: #7f897f; font-size: 9px; margin-top: 3px; }

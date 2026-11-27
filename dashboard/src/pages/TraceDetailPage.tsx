@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Copy, TriangleAlert } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
-import type { Span, TraceDetail } from "../types/tracing";
+import type { DemoConfig, Span, TraceDetail } from "../types/tracing";
 import { EmptyState, ErrorState, LoadingState } from "../components/States";
+import { computeBottleneck } from "../lib/bottleneck";
 
 interface Props {
   refreshKey: number;
@@ -13,6 +14,7 @@ interface Props {
 export default function TraceDetailPage({ refreshKey, onDataStatus }: Props) {
   const { traceId = "" } = useParams();
   const [trace, setTrace] = useState<TraceDetail | null>(null);
+  const [config, setConfig] = useState<DemoConfig | null>(null);
   const [selected, setSelected] = useState<Span | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -21,8 +23,12 @@ export default function TraceDetailPage({ refreshKey, onDataStatus }: Props) {
     setLoading(true);
     setError("");
     try {
-      const data = await api.trace(traceId);
+      const [data, configData] = await Promise.all([
+        api.trace(traceId),
+        api.getConfig().catch(() => null),
+      ]);
       setTrace(data);
+      setConfig(configData);
       setSelected(data.spans[0] || null);
       onDataStatus("live");
     } catch (err) {
@@ -42,10 +48,8 @@ export default function TraceDetailPage({ refreshKey, onDataStatus }: Props) {
   const spans = [...trace.spans].sort((a, b) => startNano(a) - startNano(b));
   const services = new Set(spans.map((span) => span.serviceName));
   const errorSpan = spans.find((span) => span.status === "error");
-  const bottleneck = spans.reduce<Span | null>((longest, span) => {
-    if (!longest || span.durationMs > longest.durationMs) return span;
-    return longest;
-  }, null);
+  const bottleneck = computeBottleneck(spans, trace.durationMs);
+  const configuredDelay = bottleneck ? configuredDelayFor(bottleneck.span.serviceName, config) : null;
 
   async function copyTraceId() {
     await navigator.clipboard.writeText(traceId);
@@ -65,16 +69,21 @@ export default function TraceDetailPage({ refreshKey, onDataStatus }: Props) {
         <DetailMetric label="Status" value={errorSpan ? "Error" : "OK"} error={Boolean(errorSpan)} />
       </section>
 
-      {bottleneck && spans.length > 0 ? (
+      {bottleneck ? (
         <section className="bottleneck-banner">
           <div className="bottleneck-icon"><TriangleAlert size={17} /></div>
           <div>
-            <span>Measured bottleneck</span>
-            <strong>{bottleneck.serviceName} · {bottleneck.operationName}</strong>
+            <span>Measured bottleneck · longest self-time</span>
+            <strong>{bottleneck.span.serviceName} · {bottleneck.span.operationName}</strong>
+            <small>Span duration minus time covered by direct child spans.</small>
+            {configuredDelay && (
+              <small>Current simulator {configuredDelay.label.toLowerCase()} delay: {configuredDelay.value} ms</small>
+            )}
+            {errorSpan && <small>Trace contains errors; this measures latency, not the cause.</small>}
           </div>
           <div className="bottleneck-duration">
-            <strong>{formatMs(bottleneck.durationMs)} ms</strong>
-            <span>{trace.durationMs > 0 ? `${Math.round((bottleneck.durationMs / trace.durationMs) * 100)}% of trace` : "Trace duration unavailable"}</span>
+            <strong>{formatMs(bottleneck.selfTimeMs)} ms</strong>
+            <span>{trace.durationMs > 0 ? `${Math.round(bottleneck.percentOfTrace)}% of trace` : "Trace duration unavailable"}</span>
           </div>
         </section>
       ) : (
@@ -191,6 +200,17 @@ function DetailMetric({ label, value, error }: { label: string; value: string; e
 function startNano(span: Span) {
   const value = Number(span.startTimeUnixNano);
   return Number.isFinite(value) ? value : 0;
+}
+
+function configuredDelayFor(serviceName: string, config: DemoConfig | null) {
+  if (!config) return null;
+  if (serviceName === "payment-service" && config.payment.delayMs > 0) {
+    return { label: "Payment", value: config.payment.delayMs };
+  }
+  if (serviceName === "inventory-service" && config.inventory.delayMs > 0) {
+    return { label: "Inventory", value: config.inventory.delayMs };
+  }
+  return null;
 }
 
 function formatMs(value: number) {
