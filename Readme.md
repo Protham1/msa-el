@@ -152,14 +152,23 @@ msa-el/
 │   │   ├── go.mod
 │   │   └── go.sum
 │   │
-│   └── inventory-service/    # Port 8084 — Inventory check
-│       ├── main.go           # HTTP handlers: /check, /config, /health
-│       ├── tracing.go        # OpenTelemetry tracer initialization
+│   ├── inventory-service/    # Port 8084 — Inventory check
+│   │   ├── main.go           # HTTP handlers: /check, /config, /health
+│   │   ├── tracing.go        # OpenTelemetry tracer initialization
+│   │   ├── go.mod
+│   │   └── go.sum
+│
+│   └── traceflow-api/         # Port 8090 — Dashboard backend-for-frontend
+│       ├── main.go
+│       ├── handlers/
+│       ├── jaeger/
+│       ├── models/
+│       ├── tracing.go
 │       ├── go.mod
 │       └── go.sum
 │
 ├── features.md               # Full feature specification
-├── ONE_HOUR_PLAN.md           # Implementation plan for the tracing pipeline
+├── api_guide.md               # TraceFlow API scope and verification record
 └── Readme.md                 # This file
 ```
 
@@ -478,6 +487,7 @@ span.RecordError(err)
 | 8082 | Order Service | Order orchestration |
 | 8083 | Payment Service | Payment processing |
 | 8084 | Inventory Service | Stock availability |
+| 8090 | TraceFlow API | Dashboard backend-for-frontend |
 | 4318 | Jaeger | OTLP HTTP receiver (spans go here) |
 | 16686 | Jaeger | UI and query API |
 
@@ -490,3 +500,79 @@ Stop the services by pressing `Ctrl+C` in each terminal, then stop Jaeger:
 ```powershell
 docker stop jaeger
 ```
+
+---
+
+## TraceFlow Dashboard
+
+The React dashboard is in `dashboard/`. It is ready to consume the TraceFlow API on port `8090` and does not contain hardcoded trace or service telemetry.
+
+### Start the dashboard
+
+```powershell
+cd dashboard
+npm install
+npm run dev
+```
+
+Open [http://localhost:5173](http://localhost:5173).
+
+The dashboard expects:
+
+| API | Default URL |
+|---|---|
+| TraceFlow API | `http://localhost:8090` |
+
+Set a different API origin with:
+
+```env
+VITE_API_BASE_URL=http://localhost:8090
+```
+
+Before the API is running, the Overview, Traces, and Service Map screens show explicit unavailable or waiting states rather than fabricated telemetry.
+
+### Dashboard screens
+
+- `/` — overview metrics, recent traces, checkout trigger, and simulator controls
+- `/services` — React Flow service topology and service detail panel
+- `/traces` — searchable trace table with service and status filters
+- `/traces/:traceId` — trace summary, waterfall, span hierarchy, span inspector, and measured bottleneck
+
+### API contract used by the dashboard
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/overview` | Dashboard summary cards and recent activity |
+| `GET /api/services` | Observed services |
+| `GET /api/traces` | Recent trace summaries |
+| `GET /api/traces/:traceID` | Trace detail and spans |
+| `GET /api/dependencies` | Telemetry-derived or static demo topology |
+| `POST /api/demo/checkout` | Trigger a checkout through Gateway |
+| `GET /api/demo/config` | Read Payment and Inventory configuration |
+| `PUT /api/demo/config` | Update Payment and Inventory configuration |
+
+### Start the TraceFlow API
+
+Start Jaeger first. The five business services are required for checkout and simulator controls; trace browsing only requires Jaeger to have stored traces.
+
+```powershell
+cd services\traceflow-api
+go run .
+```
+
+By default, the API listens on `http://localhost:8090` and queries Jaeger at `http://localhost:16686`. Configure alternate addresses with:
+
+```env
+TRACEFLOW_API_PORT=8090
+JAEGER_QUERY_URL=http://localhost:16686
+GATEWAY_URL=http://localhost:8080
+PAYMENT_SERVICE_URL=http://localhost:8083
+INVENTORY_SERVICE_URL=http://localhost:8084
+OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4318
+```
+
+The API uses Jaeger 2.23's stable `/api/v3/*` query endpoints and maps OTLP trace responses into dashboard-owned response DTOs. Its service and trace routes return observed telemetry; the dependency map is explicitly marked as the static demo topology. Services only appear as `unknown` health because Jaeger trace data does not establish current process health.
+
+The trace search covers the previous 24 hours. Overview metrics are computed from up to 1,000 returned traces; `totalTraces` is `null` and `metricsPartial` is `true` when the result reaches that cap. `sampleCount` reports the number of traces used in the calculations.
+
+For browser development, the API allows the Vite origins `http://localhost:5173` and `http://127.0.0.1:5173` by default. Override with a comma-separated `CORS_ALLOWED_ORIGINS` value if needed.

@@ -1,6 +1,6 @@
-# TraceFlow API — Next One-Hour Implementation Plan
+# TraceFlow API — Implementation and Verification
 
-> Issue-ready engineering plan for teammates. This document covers the next implementation phase only: build the backend-for-frontend TraceFlow API.
+> **Status: Complete.** The API has been implemented and verified locally against Jaeger 2.23 and the five Go services. This document records the scope and acceptance criteria; the next infrastructure phase is Docker Compose.
 
 ## Goal
 
@@ -56,29 +56,26 @@ The first implementation phase is complete.
 
 ---
 
-## Deliverables
+## Implemented structure
 
-Create `services/traceflow-api/` with:
+The API is implemented under `services/traceflow-api/`:
 
 ```text
 services/traceflow-api/
 ├── main.go
+├── tracing.go
 ├── go.mod
 ├── handlers/
-│   ├── health.go
-│   ├── overview.go
-│   ├── traces.go
-│   ├── services.go
-│   ├── dependencies.go
-│   └── demo.go
+│   └── api.go
 ├── jaeger/
 │   ├── client.go
-│   └── mapper.go
+│   ├── mapper.go
+│   └── mapper_test.go
 └── models/
     └── models.go
 ```
 
-Do not create unused files or broad abstractions. Keep the API understandable for a student demo.
+The implementation keeps the endpoint handlers together and the raw Jaeger mapping isolated. Keep changes consistent with this structure.
 
 ---
 
@@ -131,16 +128,18 @@ GET /api/traces?limit=20&service=gateway&tags=
 
 ---
 
-## Minute-by-minute plan
+## Implementation and verification sequence
 
 ### 0-10 minutes: Confirm Jaeger 2.23 endpoints
 
 1. Start or verify Jaeger.
-2. Verify the running API with curl:
+2. Verify the Jaeger v3 service and trace query endpoints:
 
    ```powershell
-   curl.exe -s http://localhost:16686/api/services
-   curl.exe -s "http://localhost:16686/api/traces?service=gateway&limit=20"
+   curl.exe -s http://localhost:16686/api/v3/services
+   $end = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+   $start = [DateTime]::UtcNow.AddHours(-24).ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+   curl.exe -s "http://localhost:16686/api/v3/traces?query.serviceName=gateway&query.startTimeMin=$start&query.startTimeMax=$end&query.searchDepth=20"
    ```
 
 3. If the running Jaeger image uses a different API route, use the routes returned by that instance rather than guessing.
@@ -390,7 +389,7 @@ Run these checks:
 curl.exe -s http://localhost:8090/api/health
 curl.exe -s http://localhost:8090/api/services
 curl.exe -s http://localhost:8090/api/traces?limit=20
-curl.exe -X POST -H "Content-Type: application/json" `
+curl.exe -X PUT -H "Content-Type: application/json" `
   -d "{\"payment\":{\"delayMs\":3000,\"failure\":false},\"inventory\":{\"delayMs\":0}}" `
   http://localhost:8090/api/demo/config
 curl.exe -X POST http://localhost:8090/api/demo/checkout
@@ -400,13 +399,22 @@ curl.exe -s http://localhost:8090/api/traces?limit=20
 Then test failure:
 
 ```powershell
-curl.exe -X POST -H "Content-Type: application/json" `
+curl.exe -X PUT -H "Content-Type: application/json" `
   -d "{\"payment\":{\"delayMs\":0,\"failure\":true},\"inventory\":{\"delayMs\":0}}" `
   http://localhost:8090/api/demo/config
 curl.exe -X POST http://localhost:8090/api/demo/checkout
 ```
 
 **Final checkpoint:** A single TraceFlow API call triggers a real checkout, and trace list/detail responses can represent its delay and failure.
+
+### Local verification completed
+
+- `go test -race ./...` and `go vet ./...` pass for `services/traceflow-api`.
+- API health, service discovery, trace list, overview, dependencies, and trace detail were tested against Jaeger 2.23.
+- API-triggered checkouts returned connected trace IDs.
+- A 500 ms Payment delay appeared as a roughly 500 ms Payment span.
+- Simulated Payment failure returned a failed checkout with error spans.
+- Simulator configuration reset was verified.
 
 ---
 
