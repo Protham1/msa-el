@@ -1,9 +1,22 @@
 import { useCallback, useEffect, useState } from "react";
-import { Activity, Clock3, Play, RotateCcw, Server, TriangleAlert } from "lucide-react";
+import {
+  Activity,
+  ArrowRight,
+  ArrowUpRight,
+  CheckCircle2,
+  Clock3,
+  Network,
+  Play,
+  RotateCcw,
+  Server,
+  TriangleAlert,
+} from "lucide-react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
-import type { CheckoutResult, DemoConfig, Overview, ServiceNode, TraceSummary } from "../types/tracing";
+import type { CheckoutResult, DemoConfig, Overview, ServiceNode } from "../types/tracing";
 import { EmptyState, ErrorState, LoadingState } from "../components/States";
+import TraceTable from "../components/TraceTable";
+import { displayServiceName, formatCount, formatLatency, formatMs, pluralize } from "../lib/format";
 
 interface Props {
   refreshKey: number;
@@ -22,6 +35,7 @@ export default function OverviewPage({ refreshKey, onDataStatus }: Props) {
     inventory: { delayMs: 0 },
   });
   const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -62,8 +76,10 @@ export default function OverviewPage({ refreshKey, onDataStatus }: Props) {
   async function saveConfig(next: DemoConfig) {
     setConfig(next);
     setSaving(true);
+    setSavedAt("");
     try {
       setConfig(await api.updateConfig(next));
+      setSavedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
     } catch (err) {
       setCheckout({ error: err instanceof Error ? err.message : "Could not update simulator settings" });
     } finally {
@@ -71,138 +87,253 @@ export default function OverviewPage({ refreshKey, onDataStatus }: Props) {
     }
   }
 
-  if (loading) return <LoadingState label="Loading system overview" />;
+  if (loading) return <LoadingState label="Loading system overview" variant="overview" />;
   if (error) return <ErrorState message={error} retry={load} />;
 
   const traces = overview?.recentTraces || [];
+  const errorCount = overview?.errorCount;
+  const errorRate = overview?.errorRate;
   const cards = [
-    { label: "Total traces", value: valueOrUnavailable(overview?.totalTraces), icon: Activity },
-    { label: "Average duration", value: overview?.averageDurationMs != null ? `${formatMs(overview.averageDurationMs)} ms` : "Unavailable", icon: Clock3 },
-    { label: "Error count", value: valueOrUnavailable(overview?.errorCount), icon: TriangleAlert },
-    { label: "Services observed", value: valueOrUnavailable(overview?.serviceCount), icon: Server },
+    {
+      label: "Total traces",
+      value: overview?.totalTraces != null ? formatCount(overview.totalTraces) : "—",
+      meta: overview?.totalTraces != null ? "Retained in Jaeger" : "Partial trace sample",
+      icon: Activity,
+      tone: "accent",
+    },
+    {
+      label: "Average latency",
+      value: overview?.averageDurationMs != null ? `${formatMs(overview.averageDurationMs)} ms` : "—",
+      meta: "End-to-end across traces",
+      icon: Clock3,
+      tone: "violet",
+    },
+    {
+      label: "Errors",
+      value: errorCount != null ? formatCount(errorCount) : "—",
+      meta: errorRate != null ? `${formatMs(errorRate * 100)}% error rate` : "No error data yet",
+      icon: TriangleAlert,
+      tone: errorCount ? "red" : "green",
+    },
+    {
+      label: "Services",
+      value: overview?.serviceCount != null ? formatCount(overview.serviceCount) : "—",
+      meta: "Reporting telemetry",
+      icon: Network,
+      tone: "amber",
+    },
   ];
 
   return (
-    <div className="overview">
-      <section className="metric-grid">
-        {cards.map(({ label, value, icon: Icon }) => (
-          <div className="metric-card" key={label}>
-            <div className="metric-icon"><Icon size={18} /></div>
-            <div><span>{label}</span><strong>{value}</strong></div>
-          </div>
+    <div className="page-stack">
+      <section className="metric-grid" aria-label="Key metrics">
+        {cards.map(({ label, value, meta, icon: Icon, tone }) => (
+          <article className="metric-card" key={label}>
+            <div className={`metric-icon tone-${tone}`}><Icon size={18} /></div>
+            <div className="metric-body">
+              <span>{label}</span>
+              <strong>{value}</strong>
+              <small>{meta}</small>
+            </div>
+          </article>
         ))}
       </section>
 
       <div className="overview-grid">
-        <div className="panel service-panel">
+        <section className="panel service-panel">
           <div className="panel-header">
-            <div><span className="section-kicker">SYSTEM</span><h2>Service health</h2></div>
-            <Link to="/services" className="text-link">Open map</Link>
+            <div>
+              <h2>Service health</h2>
+              <p>Latest status reported by the topology API.</p>
+            </div>
+            <Link to="/services" className="text-link">
+              Open map <ArrowUpRight size={13} />
+            </Link>
           </div>
           {services.length === 0 ? (
             <EmptyState title="No services observed" message="Jaeger has not reported any service names yet." />
           ) : (
             <div className="service-list">
-              {services.map((service) => (
-                <div className="service-card" key={service.id || service.name}>
-                  <span className={`status-dot ${service.status}`} />
-                  <div><strong>{service.name}</strong><small>{service.status}</small></div>
-                  <b>{service.averageLatencyMs != null ? `${formatMs(service.averageLatencyMs)} ms` : "Latency unavailable"}</b>
-                </div>
-              ))}
+              {services.map((service) => {
+                const tone = service.status === "healthy" ? "ok" : service.status === "degraded" ? "error" : "neutral";
+                const idle = service.status === "unknown" && service.averageLatencyMs == null && service.requestCount == null;
+                return (
+                  <div className={`service-row ${idle ? "is-idle" : ""}`} key={service.id || service.name}>
+                    <span className={`service-avatar ${service.status}`}><Server size={15} /></span>
+                    <div className="service-identity">
+                      <strong>{displayServiceName(service.name)}</strong>
+                      <small>{service.name}</small>
+                    </div>
+                    {idle ? (
+                      <span className="service-idle"><i className="status-dot neutral" />Awaiting traffic</span>
+                    ) : (
+                      <>
+                        <div className="service-latency">
+                          <strong>{service.averageLatencyMs != null ? formatLatency(service.averageLatencyMs) : "—"}</strong>
+                          <small>
+                            {service.requestCount != null
+                              ? pluralize(service.requestCount, "request")
+                              : "Awaiting traffic"}
+                          </small>
+                        </div>
+                        <i className={`status-pill ${tone}`}>
+                          {service.status === "healthy" ? "Healthy" : service.status === "degraded" ? "Degraded" : "No data"}
+                        </i>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
-        </div>
+        </section>
 
-        <div className="panel action-panel">
+        <section className="panel action-panel">
           <div className="panel-header">
-            <div><span className="section-kicker">DEMO</span><h2>Run checkout</h2></div>
-          </div>
-          <p>Trigger Gateway → Auth → Order → Payment + Inventory.</p>
-          <button className="primary-button" onClick={runCheckout} disabled={running}>
-            <Play size={16} fill="currentColor" /> {running ? "Running checkout..." : "Run checkout"}
-          </button>
-          {checkout && (
-            <div className={`checkout-result ${checkout.error ? "error" : ""}`}>
-              <strong>{checkout.error ? "Checkout failed" : "Checkout completed"}</strong>
-              {checkout.traceId && <Link to={`/traces/${checkout.traceId}`}>Open resulting trace</Link>}
-              {checkout.message && <span>{checkout.message}</span>}
-              {checkout.error && <span>{checkout.error}</span>}
+            <div>
+              <h2>Run checkout</h2>
+              <p>Generate a complete distributed trace.</p>
             </div>
-          )}
-        </div>
+          </div>
+          <div className="checkout-body">
+            <div>
+              <div className="checkout-route" aria-label="Checkout request path">
+                <span>Gateway</span><ArrowRight size={12} />
+                <span>Auth</span><ArrowRight size={12} />
+                <span>Order</span><ArrowRight size={12} />
+                <span>Payment</span><span className="route-plus">+</span><span>Inventory</span>
+              </div>
+              <p className="panel-copy">
+                Runs one checkout through the gateway, then fans out to payment and inventory.
+                The resulting trace appears here within a couple of seconds.
+              </p>
+            </div>
+            <div className="checkout-action">
+              <button className="primary-button" onClick={runCheckout} disabled={running}>
+                <Play size={15} fill="currentColor" />
+                {running ? "Running checkout…" : "Run checkout"}
+              </button>
+              {checkout && (
+                <div className={`checkout-result ${checkout.error ? "error" : "success"}`} role="status">
+                  <div className="checkout-result-title">
+                    {checkout.error ? <TriangleAlert size={14} /> : <CheckCircle2 size={14} />}
+                    <strong>{checkout.error ? "Checkout failed" : "Checkout completed"}</strong>
+                  </div>
+                  {checkout.traceId && (
+                    <Link to={`/traces/${checkout.traceId}`}>
+                      Open resulting trace <ArrowUpRight size={12} />
+                    </Link>
+                  )}
+                  {checkout.message && <span>{checkout.message}</span>}
+                  {checkout.error && <span>{checkout.error}</span>}
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
       </div>
 
       <div className="overview-grid lower">
-        <div className="panel traces-panel">
+        <section className="panel traces-panel">
           <div className="panel-header">
-            <div><span className="section-kicker">ACTIVITY</span><h2>Recent traces</h2></div>
-            <Link to="/traces" className="text-link">View all</Link>
+            <div>
+              <h2>Recent traces</h2>
+              <p>The newest requests seen in Jaeger.</p>
+            </div>
+            <Link to="/traces" className="text-link">
+              View all <ArrowUpRight size={13} />
+            </Link>
           </div>
           {traces.length === 0 ? (
             <EmptyState title="No recent traces" />
           ) : (
             <TraceTable traces={traces.slice(0, 8)} />
           )}
-        </div>
+        </section>
 
-        <div className="panel controls-panel">
+        <section className="panel controls-panel">
           <div className="panel-header">
-            <div><span className="section-kicker">CONTROLS</span><h2>Simulation</h2></div>
-            <button className="icon-button small" title="Reset simulation" disabled={saving} onClick={() => saveConfig({
-              payment: { delayMs: 0, failure: false }, inventory: { delayMs: 0 },
-            })}><RotateCcw size={15} /></button>
+            <div>
+              <h2>Simulation</h2>
+              <p>Inject latency or failure into the demo.</p>
+            </div>
+            <button
+              className="icon-button small"
+              title="Reset simulation"
+              aria-label="Reset simulation"
+              disabled={saving}
+              onClick={() => void saveConfig({
+                payment: { delayMs: 0, failure: false },
+                inventory: { delayMs: 0 },
+              })}
+            >
+              <RotateCcw size={14} />
+            </button>
           </div>
-          <ControlSelect label="Payment delay" value={config.payment.delayMs} options={[0, 500, 1500, 3000]} suffix="ms"
-            disabled={saving} onChange={(value) => saveConfig({ ...config, payment: { ...config.payment, delayMs: value } })} />
-          <ControlSelect label="Inventory delay" value={config.inventory.delayMs} options={[0, 500, 1500]} suffix="ms"
-            disabled={saving} onChange={(value) => saveConfig({ ...config, inventory: { delayMs: value } })} />
-          <label className="toggle-row">
-            <span><strong>Payment failure</strong><small>Return simulated HTTP 500</small></span>
-            <input type="checkbox" checked={config.payment.failure} disabled={saving}
-              onChange={(event) => saveConfig({ ...config, payment: { ...config.payment, failure: event.target.checked } })} />
-          </label>
-          <small className="controlled-note">Controlled demo fault — not an infrastructure failure.</small>
-        </div>
+
+          <div className="controls-body">
+            <ControlSelect
+              label="Payment delay"
+              hint="Added to the payment span"
+              value={config.payment.delayMs}
+              options={[0, 500, 1500, 3000]}
+              disabled={saving}
+              onChange={(value) => void saveConfig({ ...config, payment: { ...config.payment, delayMs: value } })}
+            />
+            <ControlSelect
+              label="Inventory delay"
+              hint="Added to the inventory span"
+              value={config.inventory.delayMs}
+              options={[0, 500, 1500]}
+              disabled={saving}
+              onChange={(value) => void saveConfig({ ...config, inventory: { ...config.inventory, delayMs: value } })}
+            />
+            <label className="switch-row">
+              <span>
+                <strong>Payment failure</strong>
+                <small>Return a simulated HTTP 500</small>
+              </span>
+              <span className="switch">
+                <input
+                  type="checkbox"
+                  checked={config.payment.failure}
+                  disabled={saving}
+                  onChange={(event) => void saveConfig({
+                    ...config,
+                    payment: { ...config.payment, failure: event.target.checked },
+                  })}
+                />
+                <span className="switch-track" aria-hidden="true" />
+              </span>
+            </label>
+            <div className="controls-footnote">
+              <span className="status-dot neutral" />
+              <span>{saving ? "Saving changes…" : savedAt ? `Saved at ${savedAt}` : "Changes apply to new requests instantly."}</span>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
   );
 }
 
-function TraceTable({ traces }: { traces: TraceSummary[] }) {
-  return (
-    <div className="trace-table compact">
-      <div className="trace-row header"><span>Trace</span><span>Operation</span><span>Duration</span><span>Status</span></div>
-      {traces.map((trace) => (
-        <Link className="trace-row" to={`/traces/${trace.traceId}`} key={trace.traceId}>
-          <span className="trace-id">{trace.traceId.slice(0, 12)}</span>
-          <span><strong>{trace.rootOperation}</strong><small>{trace.rootService}</small></span>
-          <span>{formatMs(trace.durationMs)} ms</span>
-          <span><i className={`status-pill ${trace.hasError ? "error" : "ok"}`}>{trace.hasError ? "Error" : "OK"}</i></span>
-        </Link>
-      ))}
-    </div>
-  );
-}
-
-function ControlSelect({ label, value, options, suffix, disabled, onChange }: {
-  label: string; value: number; options: number[]; suffix: string; disabled: boolean;
+function ControlSelect({ label, hint, value, options, disabled, onChange }: {
+  label: string;
+  hint: string;
+  value: number;
+  options: number[];
+  disabled: boolean;
   onChange: (value: number) => void;
 }) {
   return (
-    <label className="control-select">
-      <span>{label}</span>
+    <label className="control-row">
+      <span>
+        <strong>{label}</strong>
+        <small>{hint}</small>
+      </span>
       <select value={value} disabled={disabled} onChange={(event) => onChange(Number(event.target.value))}>
-        {options.map((option) => <option value={option} key={option}>{option} {suffix}</option>)}
+        {options.map((option) => <option value={option} key={option}>{option} ms</option>)}
       </select>
     </label>
   );
-}
-
-function valueOrUnavailable(value: number | null | undefined) {
-  return value == null ? "Unavailable" : String(value);
-}
-
-function formatMs(value: number) {
-  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value);
 }
