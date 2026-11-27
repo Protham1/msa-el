@@ -1,35 +1,41 @@
 package main
 
 import (
-    "context"
+	"context"
+	"os"
 
-    "go.opentelemetry.io/otel/attribute"
-    "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
-    "go.opentelemetry.io/otel/sdk/resource"
-    sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 func initTracer(ctx context.Context) (*sdktrace.TracerProvider, error) {
 
-    exporter, err := otlptracehttp.New(
-        ctx,
-        otlptracehttp.WithEndpoint("localhost:4318"),
-        otlptracehttp.WithInsecure(),
-    )
+	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	if endpoint == "" {
+		endpoint = "localhost:4318"
+	}
 
-    if err != nil {
-        return nil, err
-    }
+	exporter, err := otlptracehttp.New(
+		ctx,
+		otlptracehttp.WithEndpoint(endpoint),
+		otlptracehttp.WithInsecure(),
+	)
 
-    res := resource.NewWithAttributes(
-        "",
-        attribute.String("service.name", "gateway"),
-    )
+	if err != nil {
+		return nil, err
+	}
 
-    tp := sdktrace.NewTracerProvider(
-        sdktrace.WithBatcher(exporter),
-        sdktrace.WithResource(res),
-    )
+	res := resource.NewWithAttributes(
+		"",
+		attribute.String("service.name", "gateway"),
+	)
 
-    return tp, nil
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithResource(res),
+	)
+
+	return tp, nil
 }

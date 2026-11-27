@@ -1,51 +1,61 @@
 package main
 
 import (
-    "context"
-    "fmt"
-    "net/http"
-    "time"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"time"
 
-    "go.opentelemetry.io/otel"
-    "go.opentelemetry.io/otel/propagation"
-    "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 )
 
 func main() {
 
-    ctx := context.Background()
+	ctx := context.Background()
 
-    tp, err := initTracer(ctx)
-    if err != nil {
-        panic(err)
-    }
+	tp, err := initTracer(ctx)
+	if err != nil {
+		panic(err)
+	}
 
-    defer tp.Shutdown(ctx)
+	defer tp.Shutdown(ctx)
 
-    otel.SetTracerProvider(tp)
+	otel.SetTracerProvider(tp)
 
-    otel.SetTextMapPropagator(
-        propagation.TraceContext{},
-    )
+	otel.SetTextMapPropagator(
+		propagation.TraceContext{},
+	)
 
-    mux := http.NewServeMux()
+	mux := http.NewServeMux()
 
-    mux.HandleFunc("/validate", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "service": "auth-service"})
+	})
 
-        tracer := otel.Tracer("auth-service")
+	mux.HandleFunc("/validate", func(w http.ResponseWriter, r *http.Request) {
 
-        _, span := tracer.Start(r.Context(), "auth.validate")
-        defer span.End()
+		tracer := otel.Tracer("auth-service")
 
-        // Simulate authentication processing
-        time.Sleep(100 * time.Millisecond)
+		_, span := tracer.Start(r.Context(), "auth.validate")
+		defer span.End()
 
-        fmt.Fprintln(w, "Authentication successful")
-    })
+		// Simulate authentication processing
+		time.Sleep(100 * time.Millisecond)
 
-    handler := otelhttp.NewHandler(mux, "auth.server")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "valid",
+			"message": "authentication successful",
+		})
+	})
 
-    fmt.Println("Auth Service running on :8081")
+	handler := otelhttp.NewHandler(mux, "auth.server")
 
-    http.ListenAndServe(":8081", handler)
+	fmt.Println("Auth Service running on :8081")
+
+	http.ListenAndServe(":8081", handler)
 }
