@@ -253,93 +253,13 @@ Simulates an inventory availability check with configurable delay.
 
 ## How to Run
 
-### Prerequisites
-
-- **Go 1.21+** installed ([download](https://go.dev/dl/))
-- **Docker** installed and running ([download](https://www.docker.com/products/docker-desktop/))
-
-### Step 1: Start Jaeger
-
-Jaeger is the trace backend that receives, stores, and lets you visualize traces.
-
-```powershell
-docker run --rm -d --name jaeger `
-  -p 16686:16686 `
-  -p 4318:4318 `
-  jaegertracing/all-in-one:latest
-```
-
-Verify Jaeger is running:
-
-```powershell
-curl.exe http://localhost:16686/api/v3/services
-# Expected: {"services":["jaeger"]}
-```
-
-You can also open the Jaeger UI at [http://localhost:16686](http://localhost:16686).
-
-### Step 2: Build all services
-
-Open a terminal in the project root and build each service:
-
-```powershell
-# Build all five services
-Set-Location services\gateway;           go build -o gateway.exe .;           Set-Location ..\..
-Set-Location services\auth-service;      go build -o auth-service.exe .;      Set-Location ..\..
-Set-Location services\order-service;     go build -o order-service.exe .;     Set-Location ..\..
-Set-Location services\payment-service;   go build -o payment-service.exe .;   Set-Location ..\..
-Set-Location services\inventory-service; go build -o inventory-service.exe .; Set-Location ..\..
-```
-
-### Step 3: Start all services
-
-Open **five separate terminals** (one per service) from the project root:
-
-**Terminal 1 — Inventory (`:8084`):**
-```powershell
-cd services\inventory-service
-.\inventory-service.exe
-```
-
-**Terminal 2 — Payment (`:8083`):**
-```powershell
-cd services\payment-service
-.\payment-service.exe
-```
-
-**Terminal 3 — Order (`:8082`):**
-```powershell
-cd services\order-service
-.\order-service.exe
-```
-
-**Terminal 4 — Auth (`:8081`):**
-```powershell
-cd services\auth-service
-.\auth-service.exe
-```
-
-**Terminal 5 — Gateway (`:8080`):**
-```powershell
-cd services\gateway
-.\gateway.exe
-```
-
-### Step 4: Verify all services are healthy
-
-```powershell
-curl.exe -s http://localhost:8080/health  # Gateway
-curl.exe -s http://localhost:8081/health  # Auth
-curl.exe -s http://localhost:8082/health  # Order
-curl.exe -s http://localhost:8083/health  # Payment
-curl.exe -s http://localhost:8084/health  # Inventory
-```
-
-Each should return `{"service":"<name>","status":"ok"}`.
+For the complete local setup—including Jaeger, all Go services, the TraceFlow API, and the dashboard—see [Local Setup for Teammates](#local-setup-for-teammates) at the end of this README. Services are run directly with `go run .`; no executable build step is needed.
 
 ---
 
 ## Demo Walkthrough
+
+Start the services using the [Local Setup for Teammates](#local-setup-for-teammates) instructions at the end of this README before following the walkthrough.
 
 ### 1. Normal Checkout
 
@@ -495,7 +415,7 @@ span.RecordError(err)
 
 ## Stopping Everything
 
-Stop the services by pressing `Ctrl+C` in each terminal, then stop Jaeger:
+Stop the Go services, API, and dashboard by pressing `Ctrl+C` in their terminals. Then stop Jaeger:
 
 ```powershell
 docker stop jaeger
@@ -509,13 +429,7 @@ The React dashboard is in `dashboard/`. It is ready to consume the TraceFlow API
 
 ### Start the dashboard
 
-```powershell
-cd dashboard
-npm install
-npm run dev
-```
-
-Open [http://localhost:5173](http://localhost:5173).
+Follow the [Local Setup for Teammates](#local-setup-for-teammates) instructions at the end of this README to install dependencies and start the dashboard.
 
 The dashboard expects:
 
@@ -551,16 +465,7 @@ Before the API is running, the Overview, Traces, and Service Map screens show ex
 | `GET /api/demo/config` | Read Payment and Inventory configuration |
 | `PUT /api/demo/config` | Update Payment and Inventory configuration |
 
-### Start the TraceFlow API
-
-Start Jaeger first. The five business services are required for checkout and simulator controls; trace browsing only requires Jaeger to have stored traces.
-
-```powershell
-cd services\traceflow-api
-go run .
-```
-
-By default, the API listens on `http://localhost:8090` and queries Jaeger at `http://localhost:16686`. Configure alternate addresses with:
+The API listens on `http://localhost:8090` by default and queries Jaeger at `http://localhost:16686`. The five business services are required for checkout and simulator controls; trace browsing requires Jaeger to have stored traces. Configure alternate addresses with:
 
 ```env
 TRACEFLOW_API_PORT=8090
@@ -571,8 +476,133 @@ INVENTORY_SERVICE_URL=http://localhost:8084
 OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4318
 ```
 
-The API uses Jaeger 2.23's stable `/api/v3/*` query endpoints and maps OTLP trace responses into dashboard-owned response DTOs. Its service and trace routes return observed telemetry; the dependency map is explicitly marked as the static demo topology. Services only appear as `unknown` health because Jaeger trace data does not establish current process health.
+The API uses Jaeger 2.23's stable `/api/v3/*` query endpoints and maps OTLP trace responses into dashboard-owned response DTOs. Its service, trace, and dependency routes return observed telemetry; the dependency map uses a labeled demo fallback only when no checkout traces are available. Services only appear as `unknown` health because Jaeger trace data does not establish current process health.
 
 The trace search covers the previous 24 hours. Overview metrics are computed from up to 1,000 returned traces; `totalTraces` is `null` and `metricsPartial` is `true` when the result reaches that cap. `sampleCount` reports the number of traces used in the calculations.
 
 For browser development, the API allows the Vite origins `http://localhost:5173` and `http://127.0.0.1:5173` by default. Override with a comma-separated `CORS_ALLOWED_ORIGINS` value if needed.
+
+---
+
+## Local Setup for Teammates
+
+These steps run the whole project locally in development mode. Go services and the TraceFlow API run with `go run .`; there is no need to build `.exe` files.
+
+### Requirements
+
+- **Git**
+- **Go 1.27.1 or newer** ([download](https://go.dev/dl/))
+- **Docker Desktop** running ([download](https://www.docker.com/products/docker-desktop/))
+- **Node.js and npm** ([download](https://nodejs.org/))
+
+The Go modules download their dependencies the first time they are run. The dashboard dependencies are installed once with `npm install`.
+
+### 1. Get the project
+
+```powershell
+git clone https://github.com/Protham1/msa-el.git
+cd msa-el
+```
+
+### 2. Start Jaeger
+
+Run Jaeger in Docker. It receives traces on port `4318` and serves its UI and query API on port `16686`.
+
+```powershell
+docker run --rm -d --name jaeger `
+  -p 16686:16686 `
+  -p 4318:4318 `
+  jaegertracing/all-in-one:2.23.0
+```
+
+Open the Jaeger UI at [http://localhost:16686](http://localhost:16686).
+
+### 3. Start the five Go services
+
+Open a **separate PowerShell terminal for each service** from the project root. Keep each terminal open while using the app.
+
+**Inventory (`:8084`):**
+
+```powershell
+cd services\inventory-service
+go run .
+```
+
+**Payment (`:8083`):**
+
+```powershell
+cd services\payment-service
+go run .
+```
+
+**Order (`:8082`):**
+
+```powershell
+cd services\order-service
+go run .
+```
+
+**Auth (`:8081`):**
+
+```powershell
+cd services\auth-service
+go run .
+```
+
+**Gateway (`:8080`):**
+
+```powershell
+cd services\gateway
+go run .
+```
+
+### 4. Start the TraceFlow API
+
+Open another PowerShell terminal from the project root:
+
+```powershell
+cd services\traceflow-api
+go run .
+```
+
+The API uses the local defaults: Jaeger at `http://localhost:16686`, Gateway at `http://localhost:8080`, and API port `8090`.
+
+### 5. Start the dashboard
+
+Open another PowerShell terminal from the project root:
+
+```powershell
+cd dashboard
+npm install
+npm run dev
+```
+
+Open the dashboard at [http://localhost:5173](http://localhost:5173).
+
+### 6. Verify and try a checkout
+
+Check that the five business services are responding:
+
+```powershell
+curl.exe http://localhost:8080/health
+curl.exe http://localhost:8081/health
+curl.exe http://localhost:8082/health
+curl.exe http://localhost:8083/health
+curl.exe http://localhost:8084/health
+```
+
+Trigger a checkout to generate trace data:
+
+```powershell
+curl.exe -X POST http://localhost:8080/checkout
+```
+
+After the trace is exported, view it in the dashboard or in Jaeger. The dashboard's Service Map derives its topology from checkout traces.
+
+### Stop the project
+
+Press `Ctrl+C` in each terminal running a Go service, the TraceFlow API, or the dashboard. Stop Jaeger with:
+
+```powershell
+docker stop jaeger
+```
