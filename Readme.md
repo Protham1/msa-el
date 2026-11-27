@@ -490,3 +490,53 @@ Stop the services by pressing `Ctrl+C` in each terminal, then stop Jaeger:
 ```powershell
 docker stop jaeger
 ```
+
+---
+
+## TraceFlow Dashboard
+
+The React dashboard is in `dashboard/`. It is ready to consume the TraceFlow API on port `8090` and does not contain hardcoded trace or service telemetry.
+
+### Start the dashboard
+
+```powershell
+cd dashboard
+npm install
+npm run dev
+```
+
+Open [http://localhost:5173](http://localhost:5173).
+
+The dashboard expects:
+
+| API | Default URL |
+|---|---|
+| TraceFlow API | `http://localhost:8090` |
+
+Set a different API origin with:
+
+```env
+VITE_API_BASE_URL=http://localhost:8090
+```
+
+Before the API is running, the Overview, Traces, and Service Map screens show explicit unavailable or waiting states rather than fabricated telemetry.
+
+### Dashboard screens
+
+- `/` — overview metrics, recent traces, checkout trigger, and simulator controls
+- `/services` — React Flow service topology and service detail panel
+- `/traces` — searchable trace table with service and status filters
+- `/traces/:traceId` — trace summary, waterfall, span hierarchy, span inspector, and measured bottleneck
+
+### API contract used by the dashboard
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/overview` | Dashboard summary cards and recent activity |
+| `GET /api/services` | Observed services |
+| `GET /api/traces` | Recent trace summaries |
+| `GET /api/traces/:traceID` | Trace detail and spans |
+| `GET /api/dependencies` | Telemetry-derived or static demo topology |
+| `POST /api/demo/checkout` | Trigger a checkout through Gateway |
+| `GET /api/demo/config` | Read Payment and Inventory configuration |
+| `PUT /api/demo/config` | Update Payment and Inventory configuration |
