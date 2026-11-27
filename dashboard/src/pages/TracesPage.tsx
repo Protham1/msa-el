@@ -106,7 +106,7 @@ export default function TracesPage({ refreshKey, onDataStatus }: Props) {
           ))}
         </div>
 
-        <span className="result-count">
+        <span className="result-count" aria-live="polite">
           {filtered.length} {filtered.length === 1 ? "trace" : "traces"}
         </span>
       </div>

@@ -51,6 +51,8 @@ export default function TraceDetailPage({ refreshKey, onDataStatus }: Props) {
   const [selected, setSelected] = useState<Span | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [errorTitle, setErrorTitle] = useState("TraceFlow API unavailable");
+  const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [collecting, setCollecting] = useState(false);
   const [copied, setCopied] = useState(false);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("overview");
@@ -63,6 +65,8 @@ export default function TraceDetailPage({ refreshKey, onDataStatus }: Props) {
     const generation = ++loadGeneration.current;
     setLoading(true);
     setError("");
+    setErrorTitle("TraceFlow API unavailable");
+    setErrorStatus(null);
     try {
       const [data, configData] = await Promise.all([
         fetchTraceWhenIndexed(traceId),
@@ -75,8 +79,15 @@ export default function TraceDetailPage({ refreshKey, onDataStatus }: Props) {
       onDataStatus("live");
     } catch (err) {
       if (generation !== loadGeneration.current) return;
-      setError(err instanceof Error ? err.message : "Could not load this trace.");
-      onDataStatus("unavailable");
+      const status = err instanceof ApiError ? err.status : null;
+      setErrorStatus(status);
+      setErrorTitle(status === 404 ? "Trace not found" : "TraceFlow API unavailable");
+      setError(
+        status === 404
+          ? "This trace is not in Jaeger. It may have expired, or the link may be incomplete."
+          : err instanceof Error ? err.message : "Could not load this trace.",
+      );
+      onDataStatus(status === 404 ? "live" : "unavailable");
     } finally {
       if (generation === loadGeneration.current) setLoading(false);
     }
@@ -132,7 +143,16 @@ export default function TraceDetailPage({ refreshKey, onDataStatus }: Props) {
   }, [refreshSilently, trace, traceId]);
 
   if (loading) return <LoadingState label="Loading trace detail" variant="detail" />;
-  if (error) return <ErrorState message={error} retry={load} />;
+  if (error) {
+    return (
+      <ErrorState
+        title={errorTitle}
+        message={error}
+        retry={errorStatus === 404 ? undefined : load}
+        action={errorStatus === 404 ? <Link className="secondary-button" to="/traces">Back to traces</Link> : undefined}
+      />
+    );
+  }
   if (!trace) return <EmptyState title="Trace unavailable" />;
 
   const spans = [...trace.spans].sort((a, b) => startNano(a) - startNano(b));
@@ -179,7 +199,7 @@ export default function TraceDetailPage({ refreshKey, onDataStatus }: Props) {
           <Link to="/traces"><ArrowLeft size={14} /> Traces</Link>
           <span className="crumb-divider">/</span>
           <span className="mono trace-id-full" title={traceId}>{traceId}</span>
-          <button className="copy-button" onClick={copyTraceId} title={copied ? "Copied" : "Copy trace ID"} aria-label="Copy trace ID">
+          <button className="copy-button" onClick={copyTraceId} title={copied ? "Copied" : "Copy trace ID"} aria-label={copied ? "Trace ID copied" : "Copy trace ID"}>
             {copied ? <Check size={13} /> : <Copy size={13} />}
           </button>
           {collecting && (
@@ -301,7 +321,7 @@ export default function TraceDetailPage({ refreshKey, onDataStatus }: Props) {
                 </div>
               </div>
 
-              <div className="inspector-tabs" role="tablist" aria-label="Span details sections">
+              <div className="inspector-tabs" role="group" aria-label="Span details sections">
                 <InspectorTabButton tab="overview" current={inspectorTab} onSelect={setInspectorTab}>Overview</InspectorTabButton>
                 <InspectorTabButton tab="attributes" current={inspectorTab} onSelect={setInspectorTab} count={Object.keys(selected.attributes).length}>Attributes</InspectorTabButton>
                 <InspectorTabButton tab="events" current={inspectorTab} onSelect={setInspectorTab} count={selected.events.length}>Events</InspectorTabButton>
@@ -361,8 +381,7 @@ function InspectorTabButton({ tab, current, onSelect, count, children }: {
   return (
     <button
       type="button"
-      role="tab"
-      aria-selected={current === tab}
+      aria-pressed={current === tab}
       className={current === tab ? "active" : ""}
       onClick={() => onSelect(tab)}
     >

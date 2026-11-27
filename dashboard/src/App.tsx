@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { Activity, GitFork, ListTree, RefreshCw } from "lucide-react";
 import OverviewPage from "./pages/OverviewPage";
 import TracesPage from "./pages/TracesPage";
 import TraceDetailPage from "./pages/TraceDetailPage";
 import ServiceMapPage from "./pages/ServiceMapPage";
+import NotFoundPage from "./pages/NotFoundPage";
 
 type DataStatus = "connecting" | "live" | "unavailable";
 
@@ -23,13 +24,22 @@ const PAGE_META: Record<string, { title: string; subtitle: string }> = {
   },
 };
 
+const TRACE_DETAIL_META = { title: "Trace detail", subtitle: "Span timing, attributes and the measured bottleneck." };
+const NOT_FOUND_META = { title: "Page not found", subtitle: "No page at this address." };
+
 function App() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [dataStatus, setDataStatus] = useState<DataStatus>("connecting");
   const location = useLocation();
-  const meta = location.pathname.startsWith("/traces/")
-    ? { title: "Trace detail", subtitle: "Span timing, attributes and the measured bottleneck." }
-    : PAGE_META[location.pathname] || PAGE_META["/"];
+  const path = location.pathname.replace(/\/+$/, "") || "/";
+  const isTraceDetail = /^\/traces\/[^/]+$/.test(path);
+  const pageMeta = isTraceDetail ? TRACE_DETAIL_META : PAGE_META[path];
+  const meta = pageMeta || NOT_FOUND_META;
+  const notFound = !pageMeta;
+
+  useEffect(() => {
+    document.title = `${meta.title} · TraceFlow`;
+  }, [meta.title]);
 
   return (
     <div className="app-shell">
@@ -68,40 +78,42 @@ function App() {
             <h1>{meta.title}</h1>
             <p>{meta.subtitle}</p>
           </div>
-          <div className="topbar-actions">
-            <span
-              className={`source-badge ${dataStatus}`}
-              role="status"
-              aria-live="polite"
-              aria-label={
-                dataStatus === "live"
-                  ? "Jaeger connected"
-                  : dataStatus === "unavailable"
-                    ? "TraceFlow API unavailable"
-                    : "Connecting to the TraceFlow API"
-              }
-              title={
-                dataStatus === "live"
-                  ? "The TraceFlow API is reachable"
-                  : dataStatus === "unavailable"
-                    ? "The TraceFlow API is not reachable"
-                    : "Connecting to the TraceFlow API"
-              }
-            >
-              <i className="source-dot" />
-              <span className="source-text">
-                {dataStatus === "live" ? "Jaeger connected" : dataStatus === "connecting" ? "Connecting" : "API unavailable"}
+          {!notFound && (
+            <div className="topbar-actions">
+              <span
+                className={`source-badge ${dataStatus}`}
+                role="status"
+                aria-live="polite"
+                aria-label={
+                  dataStatus === "live"
+                    ? "Jaeger connected"
+                    : dataStatus === "unavailable"
+                      ? "TraceFlow API unavailable"
+                      : "Connecting to the TraceFlow API"
+                }
+                title={
+                  dataStatus === "live"
+                    ? "The TraceFlow API is reachable"
+                    : dataStatus === "unavailable"
+                      ? "The TraceFlow API is not reachable"
+                      : "Connecting to the TraceFlow API"
+                }
+              >
+                <i className="source-dot" />
+                <span className="source-text">
+                  {dataStatus === "live" ? "Jaeger connected" : dataStatus === "connecting" ? "Connecting" : "API unavailable"}
+                </span>
               </span>
-            </span>
-            <button
-              className="icon-button"
-              title="Refresh data"
-              aria-label="Refresh data"
-              onClick={() => setRefreshKey((key) => key + 1)}
-            >
-              <RefreshCw size={17} />
-            </button>
-          </div>
+              <button
+                className="icon-button"
+                title="Refresh data"
+                aria-label="Refresh data"
+                onClick={() => setRefreshKey((key) => key + 1)}
+              >
+                <RefreshCw size={17} />
+              </button>
+            </div>
+          )}
         </header>
 
         <div className="content">
@@ -110,6 +122,7 @@ function App() {
             <Route path="/services" element={<ServiceMapPage refreshKey={refreshKey} onDataStatus={setDataStatus} />} />
             <Route path="/traces" element={<TracesPage refreshKey={refreshKey} onDataStatus={setDataStatus} />} />
             <Route path="/traces/:traceId" element={<TraceDetailPage refreshKey={refreshKey} onDataStatus={setDataStatus} />} />
+            <Route path="*" element={<NotFoundPage />} />
           </Routes>
         </div>
       </main>

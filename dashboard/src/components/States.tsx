@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { AlertCircle, DatabaseZap, RotateCw } from "lucide-react";
 
 type SkeletonVariant = "overview" | "table" | "detail" | "map";
@@ -49,27 +50,39 @@ export function LoadingState({ label = "Loading telemetry", variant = "overview"
   );
 }
 
-export function EmptyState({ title = "No trace data", message = "Run a checkout or wait for traces to arrive in Jaeger." }: { title?: string; message?: string }) {
+export function EmptyState({ title = "No trace data", message = "Run a checkout or wait for traces to arrive in Jaeger.", icon, action }: {
+  title?: string;
+  message?: string;
+  icon?: ReactNode;
+  action?: ReactNode;
+}) {
   return (
     <div className="state">
-      <div className="state-icon"><DatabaseZap size={20} /></div>
+      <div className="state-icon">{icon ?? <DatabaseZap size={20} />}</div>
       <strong>{title}</strong>
       <span>{message}</span>
+      {action && <div className="state-action">{action}</div>}
     </div>
   );
 }
 
-export function ErrorState({ message, retry }: { message: string; retry?: () => void }) {
+export function ErrorState({ message, retry, title = "TraceFlow API unavailable", action }: {
+  message: string;
+  retry?: () => void;
+  title?: string;
+  action?: ReactNode;
+}) {
   return (
     <div className="state state-error" role="alert">
       <div className="state-icon"><AlertCircle size={20} /></div>
-      <strong>TraceFlow API unavailable</strong>
+      <strong>{title}</strong>
       <span>{message}</span>
       {retry && (
         <button className="secondary-button" onClick={retry}>
           <RotateCw size={14} /> Retry
         </button>
       )}
+      {action && <div className="state-action">{action}</div>}
     </div>
   );
 }

@@ -36,6 +36,7 @@ export default function OverviewPage({ refreshKey, onDataStatus }: Props) {
   });
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState("");
+  const [configError, setConfigError] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -74,14 +75,17 @@ export default function OverviewPage({ refreshKey, onDataStatus }: Props) {
   }
 
   async function saveConfig(next: DemoConfig) {
+    const previous = config;
     setConfig(next);
     setSaving(true);
     setSavedAt("");
+    setConfigError("");
     try {
       setConfig(await api.updateConfig(next));
       setSavedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
     } catch (err) {
-      setCheckout({ error: err instanceof Error ? err.message : "Could not update simulator settings" });
+      setConfig(previous);
+      setConfigError(err instanceof Error ? err.message : "Could not update simulator settings.");
     } finally {
       setSaving(false);
     }
@@ -306,9 +310,23 @@ export default function OverviewPage({ refreshKey, onDataStatus }: Props) {
                 <span className="switch-track" aria-hidden="true" />
               </span>
             </label>
-            <div className="controls-footnote">
-              <span className="status-dot neutral" />
-              <span>{saving ? "Saving changes…" : savedAt ? `Saved at ${savedAt}` : "Changes apply to new requests instantly."}</span>
+            {configError && (
+              <div className="controls-error" role="alert">
+                <TriangleAlert size={13} />
+                <span><strong>Settings not saved.</strong> {configError}. The previous values are still active.</span>
+              </div>
+            )}
+            <div className="controls-footnote" role="status">
+              <span className={`status-dot ${configError ? "degraded" : "neutral"}`} />
+              <span>
+                {saving
+                  ? "Saving changes…"
+                  : configError
+                    ? "Showing the last saved values."
+                    : savedAt
+                      ? `Saved at ${savedAt}`
+                      : "Changes apply to new requests instantly."}
+              </span>
             </div>
           </div>
         </section>
