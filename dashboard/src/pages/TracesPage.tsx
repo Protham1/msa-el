@@ -1,14 +1,21 @@
 import { useCallback, useEffect, useState } from "react";
-import { Search } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Search, X } from "lucide-react";
 import { api } from "../api/client";
 import type { TraceSummary } from "../types/tracing";
 import { EmptyState, ErrorState, LoadingState } from "../components/States";
+import TraceTable from "../components/TraceTable";
+import { displayServiceName } from "../lib/format";
 
 interface Props {
   refreshKey: number;
   onDataStatus: (status: "live" | "unavailable") => void;
 }
+
+const STATUS_FILTERS = [
+  { value: "all", label: "All" },
+  { value: "ok", label: "OK" },
+  { value: "error", label: "Error" },
+];
 
 export default function TracesPage({ refreshKey, onDataStatus }: Props) {
   const [traces, setTraces] = useState<TraceSummary[]>([]);
@@ -48,54 +55,67 @@ export default function TracesPage({ refreshKey, onDataStatus }: Props) {
     return matchesSearch && matchesStatus;
   });
 
-  if (loading) return <LoadingState label="Loading traces" />;
+  const counts = {
+    all: traces.length,
+    ok: traces.filter((trace) => !trace.hasError).length,
+    error: traces.filter((trace) => trace.hasError).length,
+  };
+
+  if (loading) return <LoadingState label="Loading traces" variant="table" />;
   if (error) return <ErrorState message={error} retry={load} />;
 
   return (
     <div className="panel full-panel">
       <div className="trace-toolbar">
         <label className="search-box">
-          <Search size={16} />
-          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search trace ID" />
+          <Search size={15} />
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search by trace ID"
+            aria-label="Search by trace ID"
+          />
+          {search && (
+            <button type="button" className="clear-button" aria-label="Clear search" onClick={() => setSearch("")}>
+              <X size={13} />
+            </button>
+          )}
         </label>
-        <select value={service} onChange={(event) => setService(event.target.value)}>
+
+        <select
+          value={service}
+          onChange={(event) => setService(event.target.value)}
+          aria-label="Filter by service"
+        >
           <option value="">All services</option>
-          {services.map((name) => <option value={name} key={name}>{name}</option>)}
+          {services.map((name) => <option value={name} key={name}>{displayServiceName(name)}</option>)}
         </select>
-        <select value={status} onChange={(event) => setStatus(event.target.value)}>
-          <option value="all">All statuses</option>
-          <option value="ok">OK</option>
-          <option value="error">Error</option>
-        </select>
-        <span className="result-count">{filtered.length} traces</span>
+
+        <div className="segmented" role="group" aria-label="Filter by status">
+          {STATUS_FILTERS.map((filter) => (
+            <button
+              type="button"
+              key={filter.value}
+              className={status === filter.value ? "active" : ""}
+              aria-pressed={status === filter.value}
+              onClick={() => setStatus(filter.value)}
+            >
+              {filter.label}
+              <span>{counts[filter.value as keyof typeof counts]}</span>
+            </button>
+          ))}
+        </div>
+
+        <span className="result-count" aria-live="polite">
+          {filtered.length} {filtered.length === 1 ? "trace" : "traces"}
+        </span>
       </div>
 
       {filtered.length === 0 ? (
-        <EmptyState title="No matching traces" message="Adjust the filters or run another checkout." />
+        <EmptyState title="No matching traces" message="Adjust the filters or run another checkout from the overview." />
       ) : (
-        <div className="trace-table">
-          <div className="trace-row header"><span>Trace ID</span><span>Root operation</span><span>Services</span><span>Duration</span><span>Started</span><span>Status</span></div>
-          {filtered.map((trace) => (
-            <Link className="trace-row" to={`/traces/${trace.traceId}`} key={trace.traceId}>
-              <span className="trace-id">{trace.traceId}</span>
-              <span><strong>{trace.rootOperation}</strong><small>{trace.rootService}</small></span>
-              <span>{trace.spanCount} spans · {trace.serviceNames.length} services</span>
-              <span className="mono">{formatMs(trace.durationMs)} ms</span>
-              <span>{formatStart(trace.startTime)}</span>
-              <span><i className={`status-pill ${trace.hasError ? "error" : "ok"}`}>{trace.hasError ? "Error" : "OK"}</i></span>
-            </Link>
-          ))}
-        </div>
+        <TraceTable traces={filtered} showStarted />
       )}
     </div>
   );
-}
-
-function formatMs(value: number) {
-  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value);
-}
-
-function formatStart(value: string) {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }

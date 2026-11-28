@@ -120,7 +120,7 @@ Client (curl / browser)
 | Instrumentation | OpenTelemetry Go SDK | Create spans, propagate context |
 | HTTP Instrumentation | `otelhttp` | Automatic span creation for HTTP handlers and clients |
 | Trace Export | OTLP over HTTP | Send spans to Jaeger via port 4318 |
-| Trace Backend | Jaeger (all-in-one) | Collect, store, and query traces |
+| Trace Backend | Jaeger v2 (all-in-one mode) | Collect, store, and query traces |
 | Propagation | W3C Trace Context | `traceparent` header across service boundaries |
 
 ### Project Structure
@@ -253,13 +253,21 @@ Simulates an inventory availability check with configurable delay.
 
 ## How to Run
 
-For the complete local setup—including Jaeger, all Go services, the TraceFlow API, and the dashboard—see [Local Setup for Teammates](#local-setup-for-teammates) at the end of this README. Services are run directly with `go run .`; no executable build step is needed.
+The fastest path is Docker Compose:
+
+```bash
+docker compose up --build
+```
+
+This builds and starts Jaeger, the five business services, the TraceFlow API, and the dashboard (served as a production build on port `5173`). Wait for the health checks to pass, then open [http://localhost:5173](http://localhost:5173).
+
+For live-reload development (Go services with `go run .` and the Vite dev server), see [Local Setup for Teammates](#local-setup-for-teammates) at the end of this README.
 
 ---
 
 ## Demo Walkthrough
 
-Start the services using the [Local Setup for Teammates](#local-setup-for-teammates) instructions at the end of this README before following the walkthrough.
+Start the stack with `docker compose up --build` (or the manual setup at the end of this README) before following the walkthrough.
 
 ### 1. Normal Checkout
 
@@ -415,7 +423,13 @@ span.RecordError(err)
 
 ## Stopping Everything
 
-Stop the Go services, API, and dashboard by pressing `Ctrl+C` in their terminals. Then stop Jaeger:
+If you started with Docker Compose:
+
+```bash
+docker compose down
+```
+
+If you used the manual setup, stop the Go services, API, and dashboard by pressing `Ctrl+C` in their terminals. Then stop Jaeger:
 
 ```powershell
 docker stop jaeger
@@ -486,7 +500,7 @@ For browser development, the API allows the Vite origins `http://localhost:5173`
 
 ## Local Setup for Teammates
 
-These steps run the whole project locally in development mode. Go services and the TraceFlow API run with `go run .`; there is no need to build `.exe` files.
+For the one-command path, use `docker compose up --build` from the [How to Run](#how-to-run) section. The steps below run the project on the host in development mode (Go services and Vite with live reload); there is no need to build `.exe` files.
 
 ### Requirements
 
@@ -512,7 +526,7 @@ Run Jaeger in Docker. It receives traces on port `4318` and serves its UI and qu
 docker run --rm -d --name jaeger `
   -p 16686:16686 `
   -p 4318:4318 `
-  jaegertracing/all-in-one:2.23.0
+  jaegertracing/jaeger:2.23.0
 ```
 
 Open the Jaeger UI at [http://localhost:16686](http://localhost:16686).
